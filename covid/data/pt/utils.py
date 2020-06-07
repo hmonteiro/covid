@@ -11,6 +11,7 @@ def load_population_and_geographic_data() -> pd.DataFrame:
     concelhos = concelhos[~concelhos['Nível I'].isna()]
     populacao_por_concelho = pd.read_csv(populacao_path, index_col='Concelho')
     populacao = pd.merge(populacao_por_concelho, concelhos, left_index=True, right_index=True)
+    populacao['area'] = populacao.populacao2018 / populacao.densidade2018
 
     return populacao
 
@@ -18,17 +19,18 @@ def load_population_and_geographic_data() -> pd.DataFrame:
 def expand_data(dados: pd.DataFrame, nivel: Niveis) -> pd.DataFrame:
     populacao = load_population_and_geographic_data()
 
-    populacao[f'populacao_{nivel}'] = populacao[[nivel, 'populacao2018']].groupby(nivel).populacao2018.transform('sum')
+    populacao_nivel = populacao[[nivel.value, 'populacao2018', 'area']].groupby(nivel.value).sum()
 
-    dados_limpos = dados.drop_duplicates(['Data', 'Concelho'])
-    dados_por_nivel = dados_limpos.groupby(['Data', nivel]).agg({'ConfirmadosAcumulado': 'sum'})
+    dados_por_nivel = dados.groupby(['Data', nivel.value]).sum()
 
     dados_com_regioes_e_populacao = pd.merge(
         dados_por_nivel,
-        populacao,
-        left_on='Concelho',
-        right_on=populacao.str.upper()
-    ).drop(columns='Concelhos').copy()
+        populacao_nivel,
+        left_on=nivel.value,
+        right_index=True
+    )
     dados_com_regioes_e_populacao['confirmados_por_milhao'] = dados_com_regioes_e_populacao.ConfirmadosAcumulado / (
             dados_com_regioes_e_populacao.populacao2018 / 1e6)
-    return dados_com_regioes_e_populacao
+    dados_com_regioes_e_populacao['confirmados_por_km2'] = dados_com_regioes_e_populacao.ConfirmadosAcumulado / (
+            dados_com_regioes_e_populacao.area)
+    return dados_com_regioes_e_populacao.unstack()
