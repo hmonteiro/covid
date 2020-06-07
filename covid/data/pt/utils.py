@@ -10,7 +10,7 @@ def load_population_and_geographic_data() -> pd.DataFrame:
     concelhos = pd.read_csv(concelhos_path, index_col='Concelho')
     concelhos = concelhos[~concelhos['Nível I'].isna()]
     populacao_por_concelho = pd.read_csv(populacao_path, index_col='Concelho')
-    populacao = pd.merge(populacao_por_concelho, concelhos, left_index=True, right_index=True)
+    populacao = pd.merge(populacao_por_concelho, concelhos, left_index=True, right_index=True).reset_index(drop=False)
     populacao['area'] = populacao.populacao2018 / populacao.densidade2018
 
     return populacao
