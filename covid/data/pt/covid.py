@@ -2,6 +2,7 @@ import json
 import string
 from typing import Dict, Optional
 
+import numpy as np
 import pandas as pd
 import requests
 from pkg_resources import resource_filename
@@ -31,10 +32,18 @@ def get_data(proxies: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     dados_por_concelho = pd.concat(dfs).rename(
         columns={'Concelho': 'CONCELHO'}).drop_duplicates(['Data', 'CONCELHO'])
     dados_por_concelho.Data = pd.to_datetime(dados_por_concelho.Data, unit='ms')
+    dados_por_concelho = dados_por_concelho[colunas_de_interesse]
+
+    tabela = dados_por_concelho.pivot('Data', 'CONCELHO').ffill().fillna(0)
+    tabela[
+        (tabela > tabela.sort_index(ascending=False).cummin().sort_index())] = np.nan
+    tabela = tabela.interpolate()
+    dados_por_concelho = tabela.stack().reset_index()
+
     concelhos_path = resource_filename('covid.data.pt', 'concelhos.csv')
     concelhos = pd.read_csv(concelhos_path)
     concelhos = concelhos[~concelhos['Nível I'].isna()]
-    resultado = pd.merge(left=dados_por_concelho[colunas_de_interesse],
+    resultado = pd.merge(left=dados_por_concelho,
                          right=concelhos,
                          left_on='CONCELHO',
                          right_on=concelhos.Concelho.str.upper()).drop(columns='CONCELHO')
