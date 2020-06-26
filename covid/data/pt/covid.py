@@ -1,5 +1,6 @@
 import json
-import string
+from functools import partial
+from multiprocessing import Pool
 from typing import Dict, Optional
 
 import numpy as np
@@ -8,11 +9,22 @@ import requests
 from pkg_resources import resource_filename
 
 
-def get_data(proxies: Optional[Dict[str, str]] = None) -> pd.DataFrame:
-    colunas_de_interesse = ['CONCELHO', 'ConfirmadosAcumulado', 'ConfirmadosNovos', 'Data']
+def get_raw_data(proxies: Optional[Dict[str, str]] = None):
+    concelhos_path = resource_filename('covid.data.pt', 'concelhos.csv')
+    concelhos = pd.read_csv(concelhos_path, usecols=['Concelho']).Concelho.str.upper().to_list()
+    with Pool(10) as p:
+        f = partial(_get_concelho, proxies=proxies)
+        dfs = p.map(f, concelhos)
+    dados_por_concelho = pd.concat(dfs).rename(
+        columns={'Concelho': 'CONCELHO'}).drop_duplicates(['Data', 'CONCELHO'])
+    dados_por_concelho.Data = pd.to_datetime(dados_por_concelho.Data, unit='ms')
+    return dados_por_concelho
+
+
+def _get_concelho(concelho, proxies):
     query_template = ('https://services.arcgis.com/CCZiGSEQbAxxFVh3/ArcGIS/rest/services/'
                       'COVID_Concelhos_DadosDiariosConcelho_VIEW2/FeatureServer/0/query?'
-                      'where=Concelho+like+%27{prefix}%25%27&objectIds=&time=&geometry='
+                      'where=Concelho+like+%27{concelho}%27&objectIds=&time=&geometry='
                       '&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects'
                       '&resultType=none&distance=0.0&units=esriSRUnit_Meter&returnGeodetic=false'
                       '&outFields=*&returnGeometry=false&featureEncoding=esriDefault'
@@ -23,15 +35,15 @@ def get_data(proxies: Optional[Dict[str, str]] = None) -> pd.DataFrame:
                       '&groupByFieldsForStatistics=&outStatistics=&having=&resultOffset=&resultRecordCount=32000'
                       '&returnZ=false&returnM=false&returnExceededLimitFeatures=true&quantizationParameters='
                       '&sqlFormat=none&f=pjson&token=')
-    dfs = []
-    for prefix in string.ascii_uppercase[:26]:
-        query = query_template.format(prefix=prefix)
-        json_data = json.loads(requests.get(query, proxies=proxies).text)
-        df = pd.DataFrame([f['attributes'] for f in json_data['features']])
-        dfs.append(df)
-    dados_por_concelho = pd.concat(dfs).rename(
-        columns={'Concelho': 'CONCELHO'}).drop_duplicates(['Data', 'CONCELHO'])
-    dados_por_concelho.Data = pd.to_datetime(dados_por_concelho.Data, unit='ms')
+    query = query_template.format(concelho=concelho)
+    json_data = json.loads(requests.get(query, proxies=proxies).text)
+    df = pd.DataFrame([f['attributes'] for f in json_data['features']])
+    return df
+
+
+def get_data(proxies: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+    dados_por_concelho = get_raw_data(proxies)
+    colunas_de_interesse = ['CONCELHO', 'ConfirmadosAcumulado', 'ConfirmadosNovos', 'Data']
     dados_por_concelho = dados_por_concelho[colunas_de_interesse]
 
     tabela = dados_por_concelho.pivot('Data', 'CONCELHO').ffill().fillna(0)
